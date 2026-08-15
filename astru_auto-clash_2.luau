@@ -5,8 +5,16 @@ local AutoClash2 = {}
 
 -- tuning
 local RED_HOLD    = 0.25
-local RADIUS_MULT = 1.30
 local SPAM_INTERVAL = 0.05
+
+-- auto-ativacao por "target return"
+local TARGET_RETURN_MAX_LO = 0.180      -- janela folgada (vs 0.110 do original)
+local TARGET_RETURN_MIN_HI = 0.110      -- (vs 0.060 do original)
+local TARGET_RETURN_SPD_LO = 60
+local TARGET_RETURN_SPD_HI = 200
+
+-- desativacao mais dificil
+local DEACT_RADIUS_MULT = 1.15          -- +15% no raio de parry pra desativar
 
 -- estado
 local S = {
@@ -16,6 +24,8 @@ local S = {
     lastValidAt  = 0,
     lastTargetAt = 0,
     lastTargetId = nil,
+    wasMeTarget  = false,
+    lostMeAt     = 0,
 }
 
 -- deps
@@ -72,10 +82,11 @@ local function ballInSpamRange(hr, ball, dist)
     return ok and typeof(d) == "number" and d <= dist
 end
 
-local function spamRadius(ctx)
+local function deactivationRadius(ctx)
+    -- +15% sobre o raio base: mais dificil de desativar
     local r = ctx and ctx.parryRadius
     if type(r) ~= "number" or r <= 0 then return 8 end
-    return r * RADIUS_MULT
+    return r * DEACT_RADIUS_MULT
 end
 
 local function nearestInRange(myHRP, dist)
@@ -110,6 +121,25 @@ local function getParryContext(t, hr, ball)
     }
 end
 
+-- target return window (mesma logica do autoclash, porem afrouxada)
+local function getTargetReturnWindow(speed)
+    if speed >= TARGET_RETURN_SPD_HI then
+        return TARGET_RETURN_MIN_HI
+    end
+    if speed <= TARGET_RETURN_SPD_LO then
+        return TARGET_RETURN_MAX_LO
+    end
+    local alpha = (speed - TARGET_RETURN_SPD_LO) / (TARGET_RETURN_SPD_HI - TARGET_RETURN_SPD_LO)
+    return TARGET_RETURN_MAX_LO + (TARGET_RETURN_MIN_HI - TARGET_RETURN_MAX_LO) * alpha
+end
+
+local function getBallSpeed(ball)
+    if not ball or not ball.Parent then return 0 end
+    local ok, v = pcall(function() return ball.AssemblyLinearVelocity end)
+    if not ok or typeof(v) ~= "Vector3" then return 0 end
+    return v.Magnitude
+end
+
 -- lifecycle
 local function activate(t)
     S.active      = true
@@ -123,19 +153,12 @@ local function deactivate()
     S.lastValidAt = 0
 end
 
-local function shouldActivate(t, ctx)
-    if not (ctx.hr and ctx.ball) then return false end
-    if not isBallTargeted(ctx) then return false end
-    local r = spamRadius(ctx)
-    if not ballInSpamRange(ctx.hr, ctx.ball, r) then return false end
-    if not nearestInRange(ctx.hr, r) then return false end
-    return true
-end
+-- (ativacao agora eh 100% via onTarget -> target return. sem shouldActivate.)
 
 local function shouldDeactivate(t, ctx)
     if not (ctx.hr and ctx.ball) then return true end
     if not isBallTargeted(ctx) then return true end
-    local r = spamRadius(ctx)
+    local r = deactivationRadius(ctx)            -- raio +15% aqui
     if not ballInSpamRange(ctx.hr, ctx.ball, r) then return true end
     if not nearestInRange(ctx.hr, r) then return true end
     local last = S.lastValidAt or S.activeAt or 0
@@ -159,7 +182,7 @@ function AutoClash2.evaluate(t, hr, ball, config)
     local ctx = getParryContext(t, hr, ball)
 
     if S.active then
-        local r = spamRadius(ctx)
+        local r = deactivationRadius(ctx)        -- refresh lastValidAt com raio +15%
         if isBallTargeted(ctx)
             and ballInSpamRange(ctx.hr, ctx.ball, r)
             and nearestInRange(ctx.hr, r)
@@ -169,15 +192,45 @@ function AutoClash2.evaluate(t, hr, ball, config)
         if shouldDeactivate(t, ctx) then
             deactivate()
         end
-    elseif shouldActivate(t, ctx) then
-        activate(t)
     end
+    -- enquanto inativo, NAO ativa aqui. soh o onTarget pode ativar.
 end
 
 -- callbacks
 local function onTarget(targetId)
-    S.lastTargetAt = now()
+    local t = now()
+    S.lastTargetAt = t
     S.lastTargetId = targetId
+
+    -- auto-ativacao por target return (espelha a logica do autoclash.luau)
+    if type(targetId) ~= "number" then return end
+    local lp = getLP()
+    if not lp then return end
+    local userId = lp.UserId
+    local isMe  = targetId == userId
+    local wasMe = S.wasMeTarget
+
+    if wasMe and not isMe then
+        -- deixei de ser target
+        S.wasMeTarget = true
+        S.lostMeAt    = t
+        return
+    end
+
+    if not isMe or wasMe or not S.wasMeTarget then
+        return
+    end
+
+    -- voltei a ser target dentro da janela -> ativa
+    local ball   = getBall()
+    local speed  = getBallSpeed(ball)
+    local window = getTargetReturnWindow(speed)
+    local elapsed = t - (S.lostMeAt or 0)
+    if elapsed <= window then
+        activate(t)
+    end
+    S.wasMeTarget = false
+    S.lostMeAt    = 0
 end
 
 local function onTeleport()
@@ -232,6 +285,8 @@ end
 function AutoClash2.reset()
     S.enabled  = false
     S.lastFire = 0
+    S.wasMeTarget = false
+    S.lostMeAt    = 0
     deactivate()
 end
 
