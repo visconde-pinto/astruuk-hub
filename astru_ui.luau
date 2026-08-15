@@ -218,8 +218,9 @@ local floatingButton = inst("TextButton", {
     Size = UDim2.new(0, BTN_SIZE, 0, BTN_SIZE),
     Position = btnPos(),
     BackgroundColor3 = C.header,
-    BackgroundTransparency = 0.1,
-    Text = "P",
+    BackgroundTransparency = 1,
+    Text = "A",
+    TextTransparency = 1,
     TextColor3 = C.text,
     TextSize = 26,
     Font = Enum.Font.GothamBold,
@@ -228,7 +229,16 @@ local floatingButton = inst("TextButton", {
     Parent = screenGui,
 })
 corner(floatingButton, 999)
-registerFlow(stroke(floatingButton, C.accent, 2))
+local floatingStroke = stroke(floatingButton, C.accent, 2)
+floatingStroke.Transparency = 1
+registerFlow(floatingStroke)
+task.defer(function()
+    twPlay(floatingButton, 0.52, {
+        BackgroundTransparency = 0.1,
+        TextTransparency = 0,
+    }, EASE_SINE, DIR_OUT)
+    twPlay(floatingStroke, 0.58, { Transparency = 0 }, EASE_SINE, DIR_OUT)
+end)
 
 -- auto clash
 local CLASH_SIZE   = 64
@@ -914,10 +924,27 @@ local function createSpamCard(yPos, parent)
 
     local function modeColor(mode) return mode == "Hold" and C.hold or C.toggleOn end
     local modeBtn = makeBtn(Config.SpamMode or "Toggle", 8 + halfW + 14, 64, halfW, 32, f, modeColor(Config.SpamMode))
+    local modeTransition = 0
     modeBtn.Activated:Connect(function()
+        modeTransition += 1
+        local transitionId = modeTransition
         Config.SpamMode = (Config.SpamMode == "Toggle") and "Hold" or "Toggle"
-        modeBtn.Text = Config.SpamMode
-        twPlay(modeBtn, 0.18, { BackgroundColor3 = modeColor(Config.SpamMode) }, EASE_BACK)
+        local nextColor = modeColor(Config.SpamMode)
+        twPlay(modeBtn, 0.10, {
+            TextTransparency = 1,
+            BackgroundTransparency = 0.28,
+            Size = UDim2.new(halfW, 4, 0, 34),
+        }, EASE_SINE, DIR_OUT)
+        task.delay(0.10, function()
+            if transitionId ~= modeTransition then return end
+            modeBtn.Text = Config.SpamMode
+            twPlay(modeBtn, 0.22, {
+                TextTransparency = 0,
+                BackgroundTransparency = 0.1,
+                BackgroundColor3 = nextColor,
+                Size = UDim2.new(0, halfW, 0, 32),
+            }, EASE_BACK, DIR_OUT)
+        end)
         if Config.SpamMode == "Toggle" and _G.AstruManual then setSpam(false) end
         safe(saveConfig, Config)
     end)
