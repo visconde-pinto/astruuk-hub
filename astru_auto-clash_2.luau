@@ -308,62 +308,58 @@ local function onTarget(targetId)
     end
 
     local isMe = targetId == localPlayer.UserId
-    local wasMe = S.wasMeTarget
 
-    if wasMe and not isMe then
+    if isMe then
+        local lostAt = S.lostMeAt or 0
+
+        if lostAt > 0 then
+            local character = localPlayer.Character
+            local hrp = character and character:FindFirstChild("HumanoidRootPart")
+            local ball = getBall()
+
+            if hrp and ball and ball.Parent then
+                local speed = getBallSpeed(ball)
+                local window = getTargetReturnWindow(speed)
+                local elapsed = t - lostAt
+
+                if elapsed <= window then
+                    local okSync, sync = pcall(function()
+                        return AutoParry.getSync()
+                    end)
+
+                    local syncSpeed = okSync and sync and sync.Speed or 0
+
+                    local okRadius, parryRadius = pcall(function()
+                        return AutoParry.computeParryRadius(syncSpeed)
+                    end)
+
+                    local baseRadius = okRadius
+                        and type(parryRadius) == "number"
+                        and parryRadius > 0
+                        and parryRadius
+                        or 8
+
+                    local activationRadius = baseRadius * ACT_RADIUS_MULT
+
+                    local okDistance, distance = pcall(function()
+                        return (hrp.Position - ball.Position).Magnitude
+                    end)
+
+                    if okDistance and distance <= activationRadius then
+                        activate(t)
+                    end
+                end
+            end
+        end
+
         S.wasMeTarget = true
-        S.lostMeAt = t
-        return
-    end
-
-    if not isMe or wasMe or not S.wasMeTarget then
-        return
-    end
-
-    local character = localPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local ball = getBall()
-
-    if not (hrp and ball and ball.Parent) then
-        S.wasMeTarget = false
         S.lostMeAt = 0
         return
     end
 
-    local speed = getBallSpeed(ball)
-    local window = getTargetReturnWindow(speed)
-    local elapsed = t - (S.lostMeAt or 0)
-
-    if elapsed <= window then
-        local okSync, sync = pcall(function()
-            return AutoParry.getSync()
-        end)
-
-        local syncSpeed = okSync and sync and sync.Speed or 0
-
-        local okRadius, parryRadius = pcall(function()
-            return AutoParry.computeParryRadius(syncSpeed)
-        end)
-
-        local baseRadius = okRadius
-            and type(parryRadius) == "number"
-            and parryRadius > 0
-            and parryRadius
-            or 8
-
-        local activationRadius = baseRadius * ACT_RADIUS_MULT
-
-        local okDistance, distance = pcall(function()
-            return (hrp.Position - ball.Position).Magnitude
-        end)
-
-        if okDistance and distance <= activationRadius then
-            activate(t)
-        end
+    if S.wasMeTarget then
+        S.lostMeAt = t
     end
-
-    S.wasMeTarget = false
-    S.lostMeAt = 0
 end
 
 local function onTeleport()
