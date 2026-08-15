@@ -10,6 +10,7 @@ local Players       = game:GetService("Players")
 local RunService    = game:GetService("RunService")
 local Replicated    = game:GetService("ReplicatedStorage")
 local Stats         = game:GetService("Stats")
+local HttpService   = game:GetService("HttpService")
 local UIS           = game:GetService("UserInputService")
 local TweenService  = game:GetService("TweenService")
 local CoreGui       = game:GetService("CoreGui")
@@ -155,6 +156,9 @@ local _currentHB = nil
 local _onClashOnCb  = nil
 local _onTargetCb   = nil
 local _onTeleportCb = nil
+local _onClashOnCallbacks = {}
+local _onTargetCallbacks = {}
+local _onTeleportCallbacks = {}
 
 -- warnings
 local function astruWarn(tag, msg)
@@ -477,6 +481,10 @@ local function sendParry()
         local ok, err = pcall(_onClashOnCb)
         if not ok then astruWarn("onClashOnCb", err) end
     end
+    for i = #_onClashOnCallbacks, 1, -1 do
+        local ok, err = pcall(_onClashOnCallbacks[i])
+        if not ok then astruWarn("onClashOnCallbacks", err) end
+    end
 
     return true
 end
@@ -723,6 +731,9 @@ if ballSync and ballSync:IsA("RemoteEvent") then
             S.teleportLockUntil = t + TELEPORT_LOCK
             AP.fired = false
             if _onTeleportCb then pcall(_onTeleportCb) end
+            for i = #_onTeleportCallbacks, 1, -1 do
+                pcall(_onTeleportCallbacks[i])
+            end
             return
         end
 
@@ -731,6 +742,9 @@ if ballSync and ballSync:IsA("RemoteEvent") then
         S.lastTarget, Sync.Target = newTarget, newTarget
         AP.fired = false
         if _onTargetCb then pcall(_onTargetCb, newTarget) end
+        for i = #_onTargetCallbacks, 1, -1 do
+            pcall(_onTargetCallbacks[i], newTarget)
+        end
     end))
 end
 
@@ -787,6 +801,24 @@ local Utils = {
     setOnClashOn  = function(fn) _onClashOnCb  = fn end,
     setOnTarget   = function(fn) _onTargetCb   = fn end,
     setOnTeleport = function(fn) _onTeleportCb = fn end,
+    addOnClashOn  = function(fn)
+        if type(fn) == "function" then
+            table.insert(_onClashOnCallbacks, fn)
+            return fn
+        end
+    end,
+    addOnTarget   = function(fn)
+        if type(fn) == "function" then
+            table.insert(_onTargetCallbacks, fn)
+            return fn
+        end
+    end,
+    addOnTeleport = function(fn)
+        if type(fn) == "function" then
+            table.insert(_onTeleportCallbacks, fn)
+            return fn
+        end
+    end,
     forceParry    = function() return sendParry() end,
 }
 
@@ -846,50 +878,101 @@ _G.AstruModules = {
     set        = function(self, key, value) rawset(self, key, value); _G.AstruModules[key] = value end,
 }
 
+-- sources
+local GITHUB_REPO = "visconde-pinto/astruuk-hub"
+local GITHUB_BRANCH = "main"
+
+local function githubLatestRaw(path)
+    local encodedPath = HttpService:UrlEncode(path)
+    local apiUrl = ("https://api.github.com/repos/%s/commits?path=%s&sha=%s&per_page=1"):format(
+        GITHUB_REPO,
+        encodedPath,
+        GITHUB_BRANCH
+    )
+
+    local ok, payload = pcall(function()
+        return game:HttpGet(apiUrl)
+    end)
+    if not ok or type(payload) ~= "string" then
+        return nil, nil, "github api"
+    end
+
+    local decoded, data = pcall(function()
+        return HttpService:JSONDecode(payload)
+    end)
+    if not decoded or type(data) ~= "table" or type(data[1]) ~= "table" then
+        return nil, nil, "github json"
+    end
+
+    local sha = data[1].sha
+    if type(sha) ~= "string" or #sha < 7 then
+        return nil, nil, "github sha"
+    end
+
+    local rawUrl = ("https://raw.githubusercontent.com/%s/%s/%s"):format(
+        GITHUB_REPO,
+        sha,
+        path
+    )
+    return rawUrl, sha, nil
+end
+
+local function resolveSource(source)
+    if source.kind == "pastebin" then
+        return source.url, nil, nil
+    end
+    if source.kind == "github" then
+        return githubLatestRaw(source.path)
+    end
+    return nil, nil, "source kind"
+end
+
+local function fetchSource(source)
+    local url, sha, resolveErr = resolveSource(source)
+    if not url then
+        return nil, sha, resolveErr
+    end
+
+    local ok, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if not ok or type(body) ~= "string" or #body <= 50 then
+        return nil, sha, "source body"
+    end
+    return body, sha, nil
+end
+
+local function loadChunkBody(body, tag)
+    local chunk, compileErr = loadstring(body)
+    if not chunk then
+        astruWarn(tag .. ".compile", compileErr)
+        return false
+    end
+
+    local ran, runErr = pcall(chunk)
+    if not ran then
+        astruWarn(tag .. ".run", runErr)
+        return false
+    end
+    return true
+end
+
 -- carregamento UI
 local function loadUI()
-    -- override externo
-    local src = _G.__AstruUI
-    if type(src) == "string" and #src > 0 then
-        local fn, err = loadstring(src)
-        if fn then
-            local ok, runErr = pcall(fn)
-            if ok then
-                astruLog("ui ok (injetada via _G.__AstruUI)")
-                return true
-            else
-                astruWarn("ui.run", runErr)
-            end
-        else
-            astruWarn("ui.compile", err)
+    local override = _G.__AstruUI
+    if type(override) == "string" and #override > 0 then
+        if loadChunkBody(override, "ui.override") then
+            astruLog("ui ok (override)")
+            return true
         end
     end
 
-    -- fontes remotas
-    local sources = {
-        "https://pastebin.com/raw/AdrM4aNm",
-    }
-
-    for i, url in ipairs(sources) do
-        local ok, body = pcall(function() return game:HttpGet(url) end)
-        if ok and type(body) == "string" and #body > 50 then
-            local fn, err = loadstring(body)
-            if fn then
-                local ran, runErr = pcall(fn)
-                if ran then
-                    astruLog("ui ok (fonte: primaria)")
-                    return true
-                else
-                    astruWarn("ui.run", runErr)
-                end
-            else
-                astruWarn("ui.compile", err)
-            end
-        else
-            astruWarn("ui.httpget", "falha ou payload invalido")
-        end
+    local body, sha, err = fetchSource({kind = "github", path = "astru_ui.luau"})
+    if body and loadChunkBody(body, "ui") then
+        astruLog(("ui ok (github %s)"):format(sha:sub(1, 7)))
+        return true
     end
-
+    astruWarn("ui.source", err or "invalid")
     astruLog("ui nao fornecida (rodando so logic)")
     return false
 end
@@ -897,29 +980,18 @@ end
 -- carregamento AutoClash
 local function loadAutoClash()
     local sources = {
-        "https://pastebin.com/raw/n7B2gPiF",
-        "https://pastebin.com/raw/3N7PJKm2",
+        {kind = "pastebin", url = "https://pastebin.com/raw/n7B2gPiF"},
+        {kind = "github", path = "astru_auto-clash.luau"},
     }
 
-    for i, url in ipairs(sources) do
-        local ok, src = pcall(function() return game:HttpGet(url) end)
-        if ok and type(src) == "string" and #src > 50 then
-            local chunk, err = loadstring(src)
-            if chunk then
-                local ran, runErr = pcall(chunk)
-                if ran then
-                    local tag = (i == 1) and "primario" or "fallback"
-                    astruLog(("autoclash ok (fonte: %s)"):format(tag))
-                    return true
-                else
-                    astruWarn(("autoclash.run[%d]"):format(i), runErr)
-                end
-            else
-                astruWarn(("autoclash.compile[%d]"):format(i), err)
-            end
-        else
-            astruWarn(("autoclash.httpget[%d]"):format(i), "falha ou payload invalido")
+    for i, source in ipairs(sources) do
+        local src, sha, err = fetchSource(source)
+        if src and loadChunkBody(src, "autoclash") then
+            local tag = (i == 1) and "primario pastebin" or ("fallback github " .. sha:sub(1, 7))
+            astruLog(("autoclash ok (%s)"):format(tag))
+            return true
         end
+        astruWarn(("autoclash.source[%d]"):format(i), err or "invalid")
     end
 
     astruLog("autoclash nao carregou (logic segue funcionando)")
@@ -928,36 +1000,17 @@ end
 
 -- carregamento AutoClash2
 local function loadAutoClash2()
-    local sources = {
-        "https://pastebin.com/raw/aMrhFDfe",
-    }
-
-    for i, url in ipairs(sources) do
-        if type(url) == "string" and #url > 0 then
-            local ok, src = pcall(function() return game:HttpGet(url) end)
-            if ok and type(src) == "string" and #src > 50 then
-                local chunk, err = loadstring(src)
-                if chunk then
-                    local ran, runErr = pcall(chunk)
-                    if ran then
-                        local api = _G.AstruModules and _G.AstruModules.AutoClash2
-                        local sync = _G.AstruAutoClash2 and api and api.activate or api and api.deactivate
-                        if type(sync) == "function" then pcall(sync) end
-                        astruLog("autoclash2 ok (fonte de teste)")
-                        return true
-                    else
-                        astruWarn("autoclash2.run", runErr)
-                    end
-                else
-                    astruWarn("autoclash2.compile", err)
-                end
-            else
-                astruWarn("autoclash2.httpget", "falha ou payload invalido")
-            end
-        end
+    local src, sha, err = fetchSource({kind = "github", path = "astru_auto-clash_2.luau"})
+    if src and loadChunkBody(src, "autoclash2") then
+        local api = _G.AstruModules and _G.AstruModules.AutoClash2
+        local sync = _G.AstruAutoClash2 and api and api.activate or api and api.deactivate
+        if type(sync) == "function" then pcall(sync) end
+        astruLog(("autoclash2 ok (github %s)"):format(sha:sub(1, 7)))
+        return true
     end
 
-    astruLog("autoclash2 nao carregou (raw vazio ou invalido; API stub permanece ativa)")
+    astruWarn("autoclash2.source", err or "invalid")
+    astruLog("autoclash2 nao carregou (API stub permanece ativa)")
     return false
 end
 
