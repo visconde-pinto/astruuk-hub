@@ -655,14 +655,19 @@ local function bindParry(ch)
         if t < S.teleportLockUntil then return end
         if _G.AstruManual then return end
 
+        local ball = getBall()
+
         local AC = _G.AstruModules and _G.AstruModules.AutoClash
         if AC and AC.evaluate then
-            pcall(AC.evaluate, t, hrp, getBall(), _G.AstruConfig)
+            pcall(AC.evaluate, t, hrp, ball, _G.AstruConfig)
+        end
+
+        local AC2 = _G.AstruModules and _G.AstruModules.AutoClash2
+        if AC2 and AC2.evaluate then
+            pcall(AC2.evaluate, t, hrp, ball, _G.AstruConfig)
         end
 
         tickResilience(t)
-
-        local ball = getBall()
         if not (ball and ball.Parent) then return end
         if Sync.Target ~= lp.UserId then return end
 
@@ -795,8 +800,7 @@ local Utils = {
     now           = function() return os.clock() end,
     getLocalPlayer = function() return Players.LocalPlayer end,
     getBall        = function()
-        local b = workspace:FindFirstChild("GameBall")
-        return (b and b:IsA("BasePart")) and b or nil
+        return getBall()
     end,
     setOnClashOn  = function(fn) _onClashOnCb  = fn end,
     setOnTarget   = function(fn) _onTargetCb   = fn end,
@@ -1002,9 +1006,19 @@ end
 local function loadAutoClash2()
     local src, sha, err = fetchSource({kind = "github", path = "astru_auto-clash_2.luau"})
     if src and loadChunkBody(src, "autoclash2") then
-        local api = _G.AstruModules and _G.AstruModules.AutoClash2
-        local sync = _G.AstruAutoClash2 and api and api.activate or api and api.deactivate
-        if type(sync) == "function" then pcall(sync) end
+        task.spawn(function()
+            local started = os.clock()
+            while os.clock() - started <= 5 do
+                local api = _G.AstruModules and _G.AstruModules.AutoClash2
+                if api and type(api.getState) == "function" then
+                    local sync = _G.AstruAutoClash2 and api.activate or api.deactivate
+                    if type(sync) == "function" then pcall(sync) end
+                    return
+                end
+                task.wait(0.05)
+            end
+            astruWarn("autoclash2.sync", "API real nao ficou disponivel")
+        end)
         astruLog(("autoclash2 ok (github %s)"):format(sha:sub(1, 7)))
         return true
     end
