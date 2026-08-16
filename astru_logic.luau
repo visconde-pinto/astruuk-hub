@@ -36,7 +36,7 @@ local C = {
 -- parry
 local P = {
     FIRE_LOCK                  = 0.080,
-    MIN_SPD                    = 3,
+    MIN_SPD                    = 5,
     DEFLECT_R                  = 8,
     RAD_FLOOR                  = 14,
     PB_WEIGHT                  = 1.0,
