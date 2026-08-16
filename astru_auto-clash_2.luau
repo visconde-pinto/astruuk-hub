@@ -1,11 +1,11 @@
 -- [[ astru auto clash 2 ]]
 
 -- tuning
-local RED_HOLD = 0.200
+local RED_HOLD = 0.180
 local SPAM_INTERVAL = 0.05
 
-local TARGET_RETURN_MAX_LO = 0.280
-local TARGET_RETURN_MIN_HI = 0.170
+local TARGET_RETURN_MAX_LO = 0.230
+local TARGET_RETURN_MIN_HI = 0.140
 local TARGET_RETURN_SPD_LO = 60
 local TARGET_RETURN_SPD_HI = 200
 
