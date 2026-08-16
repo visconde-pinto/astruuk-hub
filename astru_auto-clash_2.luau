@@ -13,8 +13,7 @@ local PHYS_SPD_REF = 120
 local PHYS_DOT_EMA = 0.25
 local PHYS_THRESH = 0.14
 local PHYS_RAD_SLACK = 1.22
-local ACT_RADIUS_MULT = 1.32
-local SYNC_TARGET_RADIUS_MULT = 1.05
+local ACT_RADIUS_MULT = 1.45
 local DEACT_RADIUS_MULT = 1.15
 
 -- state
@@ -291,57 +290,11 @@ local function shouldDeactivate(t, ctx)
     return (t - lastValid) >= RED_HOLD
 end
 
--- gate adicional por sync
--- Este caminho somente acrescenta uma ativacao imediata quando o target
--- acabou de mudar para o jogador e a bola ja esta muito proxima.
-local function syncCloseActivationGate(t, targetId, previousTarget)
-    if type(targetId) ~= "number" then
-        return false
-    end
-
-    local localPlayer = getLP()
-
-    if not localPlayer
-        or targetId ~= localPlayer.UserId
-        or previousTarget == targetId
-    then
-        return false
-    end
-
-    local character = localPlayer.Character
-    local hrp = character and character:FindFirstChild("HumanoidRootPart")
-    local ball = getBall()
-
-    if not (hrp and hrp.Parent and ball and ball.Parent) then
-        return false
-    end
-
-    local ctx = getParryContext(t, hrp, ball)
-    local radius = ctx and ctx.parryRadius
-
-    if type(radius) ~= "number" or radius <= 0 then
-        return false
-    end
-
-    radius = radius * SYNC_TARGET_RADIUS_MULT
-
-    if not ballInRange(hrp, ball, radius) then
-        return false
-    end
-
-    activate(t)
-    return true
-end
-
 -- callbacks
 local function onTarget(targetId)
     local t = now()
-    local previousTarget = S.lastTargetId
-
     S.lastTargetAt = t
     S.lastTargetId = targetId
-    syncCloseActivationGate(t, targetId, previousTarget)
-
     if type(targetId) ~= "number" then
         return
     end
