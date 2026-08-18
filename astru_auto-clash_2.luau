@@ -1,7 +1,7 @@
 -- [[ astru auto clash 2 ]]
 
 -- tuning
-local RED_HOLD = 0.250
+local RED_HOLD = 0.210
 local SPAM_INTERVAL = 0.05
 
 local TARGET_RETURN_MAX_LO = 0.230
@@ -13,8 +13,8 @@ local PHYS_SPD_REF = 120
 local PHYS_DOT_EMA = 0.25
 local PHYS_THRESH = 0.14
 local PHYS_RAD_SLACK = 1.22
-local ACT_RADIUS_MULT = 1.30
-local DEACT_RADIUS_MULT = 1.15
+local ACT_RADIUS_MULT = 1.33
+local DEACT_RADIUS_MULT = 1.08
 
 -- state
 local S = {
